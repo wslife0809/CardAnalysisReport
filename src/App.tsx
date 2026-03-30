@@ -3,11 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, X, Circle, Save, Trash2, RotateCcw, Download, Loader2, Youtube, Cat, ExternalLink, Info, Crop, Check, RotateCw, Maximize, Minimize, MousePointer2, ZoomIn, ZoomOut } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Upload, X, Circle, Save, Trash2, RotateCcw, Download, Loader2, Youtube, Cat, ExternalLink, Info, Crop, Check, RotateCw, Maximize, Minimize, MousePointer2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toPng } from 'html-to-image';
-import Cropper, { Area, Point } from 'react-easy-crop';
 
 interface Marker {
   id: string;
@@ -35,10 +34,12 @@ const CARD_RATIOS = {
 
 interface CropState {
   type: CardType;
-  crop: Point;
-  zoom: number;
+  x: number;
+  y: number;
+  scale: number;
   rotation: number;
-  croppedAreaPixels: Area | null;
+  isSet: boolean;
+  viewZoom: number;
 }
 
 export default function App() {
@@ -51,10 +52,12 @@ export default function App() {
   const [showCropper, setShowCropper] = useState<{ side: 'front' | 'back', rawImage: string } | null>(null);
   const [cropState, setCropState] = useState<CropState>({
     type: 'SPORTS',
-    crop: { x: 0, y: 0 },
-    zoom: 1,
+    x: 50,
+    y: 50,
+    scale: 0.5,
     rotation: 0,
-    croppedAreaPixels: null,
+    isSet: false,
+    viewZoom: 1,
   });
   
   const [front, setFront] = useState<CardSide>({
@@ -84,26 +87,28 @@ export default function App() {
         setShowCropper({ side, rawImage: result });
         setCropState({
           type: 'SPORTS',
-          crop: { x: 0, y: 0 },
-          zoom: 1,
+          x: 50,
+          y: 50,
+          scale: 0.5,
           rotation: 0,
-          croppedAreaPixels: null,
+          isSet: false,
+          viewZoom: 1,
         });
       };
       reader.readAsDataURL(file);
     }
   };
 
-  const onCropComplete = useCallback((_croppedArea: Area, croppedAreaPixels: Area) => {
-    setCropState(prev => ({ ...prev, croppedAreaPixels }));
-  }, []);
-
   const performCrop = async () => {
-    if (!showCropper || !cropState.croppedAreaPixels) return;
+    if (!showCropper) return;
 
     const img = new Image();
     img.src = showCropper.rawImage;
-    await new Promise((resolve) => (img.onload = resolve));
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      if (img.complete) resolve(null);
+    });
 
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
@@ -116,38 +121,33 @@ export default function App() {
     canvas.width = targetWidth;
     canvas.height = targetHeight;
 
-    const { x, y, width, height } = cropState.croppedAreaPixels;
-    const rotation = cropState.rotation;
+    ctx.save();
+    
+    // We want to extract a rectangle from the source image
+    // The user clicked the bottom-left corner (cropState.x, cropState.y)
+    // The box has a width = img.width * cropState.scale
+    // And height = width / ratio
+    
+    const sourceWidth = img.width * cropState.scale;
+    
+    const blX = (cropState.x / 100) * img.width;
+    const blY = (cropState.y / 100) * img.height;
 
-    // To handle rotation, we create a temporary canvas for the whole image
-    const tempCanvas = document.createElement('canvas');
-    const tempCtx = tempCanvas.getContext('2d');
-    if (!tempCtx) return;
+    // The UI rotates around the bottom-left corner (blX, blY)
+    // On the canvas, the bottom-left is (0, targetHeight)
+    ctx.translate(0, targetHeight);
+    ctx.rotate((-cropState.rotation * Math.PI) / 180);
+    
+    // Scale the context so that the sourceWidth in source pixels 
+    // becomes targetWidth in canvas pixels.
+    const s = targetWidth / sourceWidth;
+    ctx.scale(s, s);
+    
+    // Draw the image such that the source point (blX, blY) is at the origin (0,0)
+    // Since the image origin is top-left, we draw at (-blX, -blY)
+    ctx.drawImage(img, -blX, -blY);
 
-    // Calculate the size of the rotated image
-    const rotRad = (rotation * Math.PI) / 180;
-    const rotW = Math.abs(Math.cos(rotRad) * img.width) + Math.abs(Math.sin(rotRad) * img.height);
-    const rotH = Math.abs(Math.sin(rotRad) * img.width) + Math.abs(Math.cos(rotRad) * img.height);
-
-    tempCanvas.width = rotW;
-    tempCanvas.height = rotH;
-
-    tempCtx.translate(rotW / 2, rotH / 2);
-    tempCtx.rotate(rotRad);
-    tempCtx.drawImage(img, -img.width / 2, -img.height / 2);
-
-    // Now draw the cropped area from the rotated image onto the main canvas
-    ctx.drawImage(
-      tempCanvas,
-      x,
-      y,
-      width,
-      height,
-      0,
-      0,
-      targetWidth,
-      targetHeight
-    );
+    ctx.restore();
 
     // --- Draw Calibration Grid ---
     const w = targetWidth;
@@ -389,6 +389,7 @@ export default function App() {
       link.click();
     } catch (err) {
       console.error('Failed to save image:', err);
+      alert('儲存圖片失敗，請稍後再試。');
     } finally {
       setIsSaving(false);
     }
@@ -597,10 +598,12 @@ export default function App() {
           <div className="flex gap-4 w-full md:w-auto">
             <button 
               onClick={() => {
-                setCardName('');
-                setAgency(null);
-                resetSide('front');
-                resetSide('back');
+                if(confirm('確定要清除所有紀錄嗎？')) {
+                  setCardName('');
+                  setAgency(null);
+                  resetSide('front');
+                  resetSide('back');
+                }
               }}
               className="flex-1 md:flex-none flex items-center justify-center gap-2 px-8 py-4 text-white/60 hover:text-white hover:bg-white/10 rounded-2xl transition-all font-bold"
             >
@@ -648,18 +651,115 @@ export default function App() {
               <div className="flex-1 overflow-hidden flex flex-col lg:flex-row">
                 {/* Preview Area */}
                 <div className="flex-1 bg-gray-900 relative overflow-hidden flex flex-col">
-                  <div className="flex-1 relative overflow-hidden bg-gray-950">
-                    <Cropper
-                      image={showCropper.rawImage}
-                      crop={cropState.crop}
-                      zoom={cropState.zoom}
-                      rotation={cropState.rotation}
-                      aspect={CARD_RATIOS[cropState.type]}
-                      onCropChange={(crop) => setCropState(prev => ({ ...prev, crop }))}
-                      onCropComplete={onCropComplete}
-                      onZoomChange={(zoom) => setCropState(prev => ({ ...prev, zoom }))}
-                      onRotationChange={(rotation) => setCropState(prev => ({ ...prev, rotation }))}
-                    />
+                  {/* Zoom Control for Preview */}
+                  <div className="absolute top-4 left-4 z-30 flex items-center gap-2 bg-black/50 backdrop-blur-md p-2 rounded-xl border border-white/10">
+                    <button 
+                      onClick={() => setCropState(prev => ({ ...prev, viewZoom: Math.max(0.5, prev.viewZoom - 0.2) }))}
+                      className="p-1.5 hover:bg-white/10 rounded-lg text-white transition-colors"
+                    >
+                      <Minimize className="w-4 h-4" />
+                    </button>
+                    <span className="text-xs font-bold text-white min-w-[40px] text-center">
+                      預覽: {Math.round(cropState.viewZoom * 100)}%
+                    </span>
+                    <button 
+                      onClick={() => setCropState(prev => ({ ...prev, viewZoom: Math.min(10, prev.viewZoom + 0.2) }))}
+                      className="p-1.5 hover:bg-white/10 rounded-lg text-white transition-colors"
+                    >
+                      <Maximize className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="flex-1 relative overflow-auto bg-gray-950">
+                    <div 
+                      className="min-h-full min-w-full flex items-center justify-center p-12"
+                    >
+                      <div 
+                        className={`relative shadow-2xl transition-all duration-200 flex-shrink-0 ${!cropState.isSet ? 'cursor-none' : 'cursor-default'}`}
+                        style={{ 
+                          width: `${600 * cropState.viewZoom}px`,
+                          maxWidth: 'none',
+                        }}
+                      onMouseMove={(e) => {
+                        if (!cropState.isSet) {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const x = e.clientX - rect.left;
+                          const y = e.clientY - rect.top;
+                          const crosshair = document.getElementById('custom-crosshair');
+                          if (crosshair) {
+                            crosshair.style.left = `${x}px`;
+                            crosshair.style.top = `${y}px`;
+                            crosshair.style.display = 'block';
+                          }
+                        }
+                      }}
+                      onMouseLeave={() => {
+                        const crosshair = document.getElementById('custom-crosshair');
+                        if (crosshair) crosshair.style.display = 'none';
+                      }}
+                      onClick={(e) => {
+                        if (!cropState.isSet) {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const x = ((e.clientX - rect.left) / rect.width) * 100;
+                          const y = ((e.clientY - rect.top) / rect.height) * 100;
+                          setCropState(prev => ({ ...prev, x, y, isSet: true }));
+                        }
+                      }}
+                    >
+                      <img 
+                        src={showCropper.rawImage} 
+                        alt="Raw" 
+                        className="w-full h-auto block select-none pointer-events-none"
+                      />
+                      
+                      {/* Custom Crosshair Guide */}
+                      {!cropState.isSet && (
+                        <div 
+                          id="custom-crosshair"
+                          className="absolute pointer-events-none z-40 hidden"
+                          style={{ transform: 'translate(-50%, -50%)' }}
+                        >
+                          {/* Horizontal Line */}
+                          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[2000px] h-[0.5px] bg-ws-orange/80" />
+                          {/* Vertical Line */}
+                          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[0.5px] h-[2000px] bg-ws-orange/80" />
+                          {/* Center Dot */}
+                          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-1.5 bg-white rounded-full shadow-sm" />
+                        </div>
+                      )}
+
+                      {/* Crop Box Overlay */}
+                      {cropState.isSet && (
+                        <div 
+                          className="absolute border-[1px] border-ws-orange/60 shadow-[0_0_0_9999px_rgba(0,0,0,0.6)] pointer-events-none z-20"
+                          style={{
+                            left: `${cropState.x}%`,
+                            top: `${cropState.y}%`,
+                            width: `${cropState.scale * 100}%`,
+                            aspectRatio: CARD_RATIOS[cropState.type],
+                            transform: `translate(0, -100%) rotate(${cropState.rotation}deg)`,
+                            transformOrigin: 'bottom left',
+                          }}
+                        >
+                          <div className="absolute inset-0 grid grid-cols-3 grid-rows-3">
+                            {[...Array(9)].map((_, i) => (
+                              <div key={i} className="border-[0.5px] border-white/20" />
+                            ))}
+                          </div>
+                          <div className="absolute -bottom-6 left-0 text-ws-orange/80 font-bold text-[9px] bg-black/40 backdrop-blur-sm px-1.5 py-0.5 rounded whitespace-nowrap">
+                            左下角起點
+                          </div>
+                        </div>
+                      )}
+
+                      {!cropState.isSet && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/20 text-white text-center p-4 pointer-events-none">
+                          <div className="bg-black/60 backdrop-blur-md px-6 py-3 rounded-2xl border border-white/10">
+                            <p className="font-bold text-lg">請點擊卡片的「左下角」</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -686,51 +786,74 @@ export default function App() {
                   </div>
 
                   <div className="space-y-6">
-                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest block">2. 調整裁切</label>
+                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest block">2. 調整方框</label>
                     
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs font-bold text-ws-navy flex items-center gap-2">
-                            <ZoomIn className="w-3 h-3" /> 縮放 (Zoom)
-                          </span>
-                          <span className="text-xs font-mono font-bold text-ws-blue">{cropState.zoom.toFixed(1)}x</span>
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-bold text-ws-navy">縮放 (Scale)</span>
+                        <div className="flex items-center gap-1">
+                          <input 
+                            type="number" 
+                            step="0.1"
+                            min="1"
+                            max="100"
+                            value={(cropState.scale * 100).toFixed(1)}
+                            onChange={(e) => setCropState(prev => ({ ...prev, scale: parseFloat(e.target.value) / 100 }))}
+                            className="w-16 bg-gray-50 border border-gray-200 rounded px-1 py-0.5 text-xs font-bold text-ws-navy text-right"
+                          />
+                          <span className="text-[10px] font-bold text-gray-400">%</span>
                         </div>
-                        <input 
-                          type="range"
-                          min={1}
-                          max={3}
-                          step={0.1}
-                          value={cropState.zoom}
-                          onChange={(e) => setCropState(prev => ({ ...prev, zoom: Number(e.target.value) }))}
-                          className="w-full h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer accent-ws-blue"
-                        />
                       </div>
-
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs font-bold text-ws-navy flex items-center gap-2">
-                            <RotateCw className="w-3 h-3" /> 旋轉 (Rotation)
-                          </span>
-                          <span className="text-xs font-mono font-bold text-ws-blue">{cropState.rotation}°</span>
-                        </div>
+                      <div className="flex items-center gap-3">
                         <input 
-                          type="range"
-                          min={0}
-                          max={360}
-                          step={1}
-                          value={cropState.rotation}
-                          onChange={(e) => setCropState(prev => ({ ...prev, rotation: Number(e.target.value) }))}
-                          className="w-full h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer accent-ws-blue"
+                          type="range" min="0.01" max="1" step="0.001"
+                          value={cropState.scale}
+                          onChange={(e) => setCropState(prev => ({ ...prev, scale: parseFloat(e.target.value) }))}
+                          className="flex-1 accent-ws-blue"
                         />
                       </div>
                     </div>
+
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-bold text-ws-navy">旋轉 (Rotate)</span>
+                        <div className="flex items-center gap-1">
+                          <input 
+                            type="number" 
+                            step="0.1"
+                            min="-180"
+                            max="180"
+                            value={cropState.rotation.toFixed(1)}
+                            onChange={(e) => setCropState(prev => ({ ...prev, rotation: parseFloat(e.target.value) }))}
+                            className="w-16 bg-gray-50 border border-gray-200 rounded px-1 py-0.5 text-xs font-bold text-ws-navy text-right"
+                          />
+                          <span className="text-[10px] font-bold text-gray-400">°</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="range" min="-180" max="180" step="0.1"
+                          value={cropState.rotation}
+                          onChange={(e) => setCropState(prev => ({ ...prev, rotation: parseFloat(e.target.value) }))}
+                          className="flex-1 accent-ws-orange"
+                        />
+                      </div>
+                    </div>
+
+                    <button 
+                      onClick={() => setCropState(prev => ({ ...prev, isSet: false }))}
+                      className="w-full py-3 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      重設起點
+                    </button>
                   </div>
 
                   <div className="pt-4">
                     <button 
+                      disabled={!cropState.isSet}
                       onClick={performCrop}
-                      className="w-full py-4 bg-ws-red text-white rounded-2xl font-black text-lg shadow-xl hover:bg-red-600 transition-all flex items-center justify-center gap-2"
+                      className="w-full py-4 bg-ws-red text-white rounded-2xl font-black text-lg shadow-xl hover:bg-red-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                     >
                       <Check className="w-6 h-6" />
                       完成裁切
@@ -738,9 +861,10 @@ export default function App() {
                   </div>
                 </div>
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
