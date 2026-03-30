@@ -44,6 +44,7 @@ interface CropState {
 
 export default function App() {
   const [cardName, setCardName] = useState('');
+  const [holderName, setHolderName] = useState('');
   const [agency, setAgency] = useState<Agency | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
@@ -460,10 +461,10 @@ export default function App() {
         {/* Condition Details */}
         <div className="space-y-4 bg-white p-6 rounded-[32px] shadow-lg border border-gray-50">
           {[
-            { label: '置中', key: 'centering', placeholder: '例如: 50/50' },
-            { label: '四角', key: 'corners', placeholder: '描述四角狀況' },
-            { label: '邊緣', key: 'edges', placeholder: '描述邊緣狀況' },
-            { label: '表面', key: 'surface', placeholder: '描述表面狀況' }
+            { label: '置中', key: 'centering', placeholder: '' },
+            { label: '四角', key: 'corners', placeholder: '' },
+            { label: '邊緣', key: 'edges', placeholder: '' },
+            { label: '表面', key: 'surface', placeholder: '' }
           ].map((field) => (
             <div key={field.key} className="flex flex-col gap-1.5">
               <label className="text-sm font-bold text-gray-500 ml-1 uppercase tracking-wider">{field.label}</label>
@@ -575,7 +576,13 @@ export default function App() {
                 </div>
                 <div>
                   <span className="font-black uppercase text-sm tracking-widest block text-ws-navy">W.S.Life Report</span>
-                  <span className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">Card Condition Documentation</span>
+                  <input 
+                    type="text"
+                    value={holderName}
+                    onChange={(e) => setHolderName(e.target.value)}
+                    className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter bg-transparent border-b border-gray-100 focus:border-ws-navy outline-none w-full py-0.5"
+                    placeholder="輸入持有者名稱..."
+                  />
                 </div>
               </div>
               <div className="text-right">
@@ -600,6 +607,7 @@ export default function App() {
               onClick={() => {
                 if(confirm('確定要清除所有紀錄嗎？')) {
                   setCardName('');
+                  setHolderName('');
                   setAgency(null);
                   resetSide('front');
                   resetSide('back');

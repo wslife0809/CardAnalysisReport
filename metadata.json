@@ -1,5 +1,5 @@
 {
-  "name": "Remix: Card Condition Tracker",
-  "description": "A professional tool for recording card conditions with image annotation for damage marking.",
+  "name": "Card Condition Report Tool",
+  "description": "A clean, structured tool for describing card centering, corners, and edges with custom input fields.",
   "requestFramePermissions": []
 }

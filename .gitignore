@@ -8,3 +8,5 @@ dist-ssr
 .DS_Store
 .eslintcache
 package-lock.json
+deploy.yml
+.github/workflows/deploy.yml
